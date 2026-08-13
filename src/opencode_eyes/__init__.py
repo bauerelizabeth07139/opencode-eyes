@@ -1,4 +1,5 @@
 import base64
+import io
 import json
 import logging
 import os
@@ -20,6 +21,9 @@ except ImportError:
 STEP_API_BASE = "https://api.stepfun.com/step_plan/v1/chat/completions"
 STEP_API_KEY = os.environ.get("STEP_API_KEY", "")
 STEP_MODEL = os.environ.get("STEP_MODEL", "step-3.7-flash")
+STEP_TIMEOUT = int(os.environ.get("STEP_TIMEOUT", "120"))
+STEP_MAX_DIMENSION = int(os.environ.get("STEP_MAX_DIMENSION", "2048"))
+STEP_JPEG_QUALITY = int(os.environ.get("STEP_JPEG_QUALITY", "85"))
 
 _TOOLS = [
     {
@@ -48,6 +52,11 @@ _TOOLS = [
 
 
 def _encode_image(image_path: str) -> str:
+    """Load an image, downscale to a sane size, and compress to a JPEG base64 string.
+
+    Shrinking the payload dramatically reduces upload + inference latency, which
+    keeps the request well under the MCP client timeout (default 5000 ms).
+    """
     path = Path(image_path)
     if not path.is_file():
         raise FileNotFoundError(f"Image file not found: {image_path}")
@@ -56,9 +65,35 @@ def _encode_image(image_path: str) -> str:
     if img.mode not in ("RGB", "RGBA"):
         img = img.convert("RGB")
 
-    buf = __import__("io").BytesIO()
-    img.save(buf, format="PNG")
+    if STEP_MAX_DIMENSION > 0:
+        img.thumbnail((STEP_MAX_DIMENSION, STEP_MAX_DIMENSION), PILImage.LANCZOS)
+
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", quality=STEP_JPEG_QUALITY, optimize=True)
     return base64.b64encode(buf.getvalue()).decode("utf-8")
+
+
+def _extract_text(message: dict) -> str:
+    """Return assistant text, falling back to reasoning fields when content is empty.
+
+    step-3.7-flash is a reasoning model and sometimes returns the answer in
+    `reasoning_content`/`reasoning` with an empty `content`.
+    """
+    content = message.get("content")
+    if isinstance(content, str) and content.strip():
+        return content
+    if isinstance(content, list):
+        parts = []
+        for item in content:
+            if isinstance(item, dict) and item.get("type") == "text" and item.get("text"):
+                parts.append(item["text"])
+        if parts:
+            return "\n".join(parts)
+    for key in ("reasoning_content", "reasoning", "reasoning_text"):
+        value = message.get(key)
+        if isinstance(value, str) and value.strip():
+            return value
+    return ""
 
 
 def _call_step_api(image_b64: str, prompt: str) -> str:
@@ -71,12 +106,12 @@ def _call_step_api(image_b64: str, prompt: str) -> str:
                     {"type": "text", "text": prompt},
                     {
                         "type": "image_url",
-                        "image_url": {"url": f"data:image/png;base64,{image_b64}"},
+                        "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"},
                     },
                 ],
             }
         ],
-        "max_tokens": 1024,
+        "max_tokens": 2048,
     }).encode("utf-8")
 
     req = urllib.request.Request(
@@ -90,23 +125,29 @@ def _call_step_api(image_b64: str, prompt: str) -> str:
     )
 
     try:
-        with urllib.request.urlopen(req, timeout=120) as resp:
+        with urllib.request.urlopen(req, timeout=STEP_TIMEOUT) as resp:
             raw = resp.read().decode("utf-8")
     except urllib.error.HTTPError as exc:
         body = exc.read().decode("utf-8", errors="replace")
         raise RuntimeError(f"StepFun API HTTP {exc.code}: {body}") from exc
+    except urllib.error.URLError as exc:
+        raise RuntimeError(f"StepFun API connection error: {exc.reason}") from exc
 
     result = json.loads(raw)
     choices = result.get("choices", [])
     if not choices:
         raise RuntimeError(f"No choices in API response: {result}")
 
-    return choices[0]["message"]["content"]
+    text = _extract_text(choices[0].get("message", {}))
+    if not text:
+        raise RuntimeError(f"Empty response from {STEP_MODEL}: {result}")
+    return text
 
 
 def _send(message: dict):
-    sys.stdout.write(json.dumps(message, ensure_ascii=False) + "\n")
-    sys.stdout.flush()
+    data = json.dumps(message, ensure_ascii=False) + "\n"
+    sys.stdout.buffer.write(data.encode("utf-8"))
+    sys.stdout.buffer.flush()
 
 
 def _handle_request(message: dict) -> dict:
@@ -119,11 +160,13 @@ def _handle_request(message: dict) -> dict:
         response["id"] = req_id
 
     try:
-        if method == "initialize":
+        if method == "ping":
+            response["result"] = {}
+        elif method == "initialize":
             response["result"] = {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {"tools": {}},
-                "serverInfo": {"name": "opencode-eyes", "version": "1.0.0"},
+                "serverInfo": {"name": "opencode-eyes", "version": "1.0.2"},
             }
         elif method == "tools/list":
             response["result"] = {"tools": _TOOLS}
@@ -165,8 +208,8 @@ def main():
         logger.warning("STEP_API_KEY is not set. Set it via environment variable.")
     logger.info("opencode-eyes server starting...")
 
-    for line in sys.stdin:
-        line_str = line.strip()
+    for raw_line in sys.stdin.buffer:
+        line_str = raw_line.decode("utf-8", errors="replace").strip()
         if not line_str:
             continue
 

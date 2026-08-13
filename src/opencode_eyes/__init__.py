@@ -1,4 +1,3 @@
-import asyncio
 import base64
 import json
 import logging
@@ -110,7 +109,7 @@ def _send(message: dict):
     sys.stdout.flush()
 
 
-async def _handle_request(message: dict):
+def _handle_request(message: dict) -> dict:
     method = message.get("method", "")
     req_id = message.get("id")
     params = message.get("params", {})
@@ -145,8 +144,7 @@ async def _handle_request(message: dict):
                 raise RuntimeError("STEP_API_KEY environment variable is not set")
 
             image_b64 = _encode_image(image_path)
-            loop = asyncio.get_event_loop()
-            description = await loop.run_in_executor(None, _call_step_api, image_b64, prompt)
+            description = _call_step_api(image_b64, prompt)
 
             response["result"] = {
                 "content": [
@@ -159,30 +157,16 @@ async def _handle_request(message: dict):
         logger.error("Error handling %s: %s", method, exc, exc_info=True)
         response["error"] = {"code": -32603, "message": str(exc)}
 
-    _send(response)
+    return response
 
 
-async def _run():
+def main():
+    if not STEP_API_KEY:
+        logger.warning("STEP_API_KEY is not set. Set it via environment variable.")
     logger.info("opencode-eyes server starting...")
-    loop = asyncio.get_event_loop()
 
-    reader = asyncio.StreamReader()
-    protocol = asyncio.StreamReaderProtocol(reader)
-    await loop.connect_read_pipe(lambda: protocol, sys.stdin)
-
-    write_transport, _ = await loop.connect_write_pipe(
-        lambda: asyncio.StreamWriterProtocol(
-            asyncio.StreamWriter(sys.stdout.buffer, None, None, loop)
-        ),
-        sys.stdout.buffer,
-    )
-
-    while True:
-        line = await reader.readline()
-        if not line:
-            break
-
-        line_str = line.decode("utf-8").strip()
+    for line in sys.stdin:
+        line_str = line.strip()
         if not line_str:
             continue
 
@@ -196,13 +180,7 @@ async def _run():
             logger.info("Client initialized notification received")
             continue
 
-        asyncio.create_task(_handle_request(message))
-
-
-def main():
-    if not STEP_API_KEY:
-        logger.warning("STEP_API_KEY is not set. Set it via environment variable.")
-    asyncio.get_event_loop().run_until_complete(_run())
+        _send(_handle_request(message))
 
 
 if __name__ == "__main__":

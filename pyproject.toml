@@ -1,0 +1,12 @@
+{
+  "name": "opencode-eyes",
+  "version": "1.0.0",
+  "description": "MCP server that provides image description capability using StepFun Step-3.7-flash multimodal model. Gives vision to models without multimodal ability.",
+  "license": "MIT",
+  "scripts": {
+    "start": "python -m opencode_eyes"
+  },
+  "dependencies": {
+    "Pillow": ">=9.0.0"
+  }
+}

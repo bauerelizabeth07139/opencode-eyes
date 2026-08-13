@@ -15,7 +15,7 @@ MCP server that provides image description capability using StepFun **Step-3.7-f
 | 变量 | 必填 | 默认值 | 说明 |
 |------|------|--------|------|
 | `STEP_API_KEY` | 是 | — | StepFun API Key |
-| `STEP_MODEL` | 否 | `step-3.7-flash` | 使用的模型名称 |
+| `STEP_MODEL` | 否 | `step-3.7-flash` | 使用的模型名称（Step Plan 专用地址 `https://api.stepfun.com/step_plan/v1`） |
 
 ## 安装
 

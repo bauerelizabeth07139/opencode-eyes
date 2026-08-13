@@ -18,7 +18,7 @@ except ImportError:
     sys.exit(1)
 
 
-STEP_API_BASE = "https://api.stepfun.com/v1/chat/completions"
+STEP_API_BASE = "https://api.stepfun.com/step_plan/v1/chat/completions"
 STEP_API_KEY = os.environ.get("STEP_API_KEY", "")
 STEP_MODEL = os.environ.get("STEP_MODEL", "step-3.7-flash")
 

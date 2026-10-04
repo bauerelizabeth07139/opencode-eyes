@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "opencode-eyes 图片描述",
+    "description": "给不具备多模态能力的模型一双眼睛:挂载本地 stdio MCP 服务器,把图片交给 StepFun step-3.7-flash 多模态模型,以 mcp__opencode_eyes__describe_image 返回详细文字描述。"
+  }
+}

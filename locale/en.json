@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "opencode-eyes",
+    "description": "Eyes for text-only models: mounts a local stdio MCP server that sends an image file to StepFun's step-3.7-flash vision model and returns a detailed description, as mcp__opencode_eyes__describe_image."
+  }
+}

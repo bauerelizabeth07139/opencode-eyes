@@ -1,51 +1,151 @@
-# opencode-eyes 👁️
+# opencode-eyes
 
-MCP server that provides image description capability using StepFun **Step-3.7-flash** multimodal model.
+**Eyes for models that cannot see.** The image goes to StepFun's
+`step-3.7-flash` vision model; the description comes back as tool output.
 
-为不具备多模态能力的模型提供**"眼睛"**。将图片输入，即可获得详细的图片文字描述。
+*给不具备多模态能力的模型一双眼睛:把图片交给 StepFun 多模态模型,拿回文字描述。*
 
-## 功能
+As a DeepSeek Harness plugin: the MCP server ships inside the bundle, so
+installing one plugin is the whole setup — no `mcpServers` file to hand-edit.
 
-| 工具 | 说明 |
-|------|------|
-| `describe_image` | 描述一张图片的内容，使用 StepFun Step-3.7-flash 多模态大模型 |
+## Install
 
-## 环境变量
+**DeepSeek Harness Desktop** — open **Plugins** in the sidebar, choose **Add
+plugin**, and enter:
 
-| 变量 | 必填 | 默认值 | 说明 |
-|------|------|--------|------|
-| `STEP_API_KEY` | 是 | — | StepFun API Key |
-| `STEP_MODEL` | 否 | `step-3.7-flash` | 使用的模型名称（Step Plan 专用地址 `https://api.stepfun.com/step_plan/v1`） |
-| `STEP_TIMEOUT` | 否 | `120` | StepFun API 请求超时（秒） |
-| `STEP_MAX_DIMENSION` | 否 | `2048` | 发送前图片最长边缩放到该像素，0 表示不缩放 |
-| `STEP_JPEG_QUALITY` | 否 | `85` | 发送前 JPEG 压缩质量（0-100） |
-
-## 更新日志 (v1.0.2)
-
-- **修复 MCP -32001 Request timed out**：发送前将图片缩放/压缩为 JPEG，大幅减小 payload、降低 API 延迟，避免超过 MCP 客户端默认 5s 超时。
-- **修复空描述**：`step-3.7-flash` 有时把答案放在 `reasoning_content`/`reasoning` 而 `content` 为空，现已自动回退。
-- **修复 Windows 中文乱码**：stdout/stdin 改为 UTF-8 字节读写。
-- 新增 `ping` 方法支持，更健壮的 MCP 握手。
-
-> 注意：opencode 的 MCP 请求超时默认为 5000ms。若仍需更宽松的超时，可在 opencode 配置中为该 MCP 设置 `"timeout": 120000`，或全局设置 `"experimental": { "mcp_timeout": 120000 }`。
-
-## 安装
-
-```bash
-pip install Pillow
+```
+https://github.com/bauerelizabeth07139/opencode-eyes
 ```
 
-## 运行
+Then switch the new **dsh-opencode-eyes** bundle on. The Desktop app boots the
+reserved `desktop` profile, so that is where it has to be enabled.
 
-```bash
-# 设置环境变量
-set STEP_API_KEY=你的StepFun API Key
+**dsh CLI** — install it into the profile you actually boot:
 
-# 启动服务
-python -m opencode_eyes
+```sh
+dsh plugin --profile web add bauerelizabeth07139/opencode-eyes
 ```
 
-## 在 OpenCode 中配置
+**No git on the machine?** pnpm resolves a git shorthand with `git ls-remote`,
+which fails with `'git' is not recognized` when git is missing. Use the tarball
+instead — that path is plain HTTPS:
+
+```sh
+dsh plugin --profile web add https://codeload.github.com/bauerelizabeth07139/opencode-eyes/tar.gz/main
+```
+
+The same address works in the Desktop **Add plugin** dialog. Replace `main`
+with a commit SHA to pin an exact revision (`/tar.gz/<sha>`).
+
+Uninstall with `dsh plugin --profile web remove dsh-opencode-eyes`.
+
+## Requirements
+
+- **Python ≥ 3.8** on `PATH`, or pointed at with `python`.
+- **Pillow** in that interpreter — the server's only third-party import
+  (`pip install Pillow`).
+- **A StepFun API key** in `STEP_API_KEY` (or `config.apiKey`). Without one the
+  server still starts and `describe_image` returns a clear error.
+
+## Tools
+
+The server registers `1` tool(s). DSH namespaces them automatically,
+so the model calls them as `mcp__opencode_eyes__<tool>`:
+
+| Tool | What it does |
+|---|---|
+| `describe_image` | Reads an image file, base64-encodes it as JPEG (optionally downscaled) and asks the vision model to describe it. Parameters: `image_path` (required), `prompt` (optional). |
+
+## Configuration
+
+| Key | Environment variable | Default | Meaning |
+|---|---|---|---|
+| `python` | — | discovered | interpreter that runs the server |
+| `apiKey` | `STEP_API_KEY` | *(empty)* | StepFun credential; required by `describe_image` |
+| `model` | `STEP_MODEL` | `step-3.7-flash` | model id sent in the request |
+| `timeoutSeconds` | `STEP_TIMEOUT` | `120` | the server's own HTTP timeout |
+| `maxDimension` | `STEP_MAX_DIMENSION` | `2048` | images are downscaled to this edge length |
+| `jpegQuality` | `STEP_JPEG_QUALITY` | `85` | JPEG quality of the re-encoded image |
+| `toolCallTimeoutMs` | — | `300000` | DSH's per-call budget; keep it above `timeoutSeconds` |
+| `env` | — | `{}` | raw environment passthrough for anything else |
+
+Every field is optional and lives in the loader row. For example, in
+`cordis.patch.yml`:
+
+```yaml
+- id: dsh-opencode-eyes
+  name: 'dsh-opencode-eyes'
+  config:
+    apiKey: 'sk-...'
+    toolCallTimeoutMs: 300000
+```
+
+## Notes
+
+- **The API base URL is compiled into the server** (`https://api.stepfun.com/step_plan/v1/chat/completions`);
+  there is no `baseUrl` option to point it elsewhere. This plugin exposes only
+  what the server actually reads.
+- **`src/` layout.** The package is a `src/`-layout Python module, so the
+  server must run with the repository's `src` directory as its working
+  directory. The plugin does that for you.
+- **Timeouts.** The server waits up to `STEP_TIMEOUT` (120 s) for StepFun, which
+  is longer than the harness's 60 s default, so the plugin mounts with a 300 s
+  per-call budget.
+
+## How it is mounted
+
+`index.js` resolves a Python interpreter (the configured `python`, then
+`python3`/`python` on `PATH`), hands the server its argv and working directory,
+and mounts it as a stdio MCP server through `@deepseek-ai/dsh-mcp-client` with
+`failOnStartupError: true`, so a server that cannot start is a visible error
+rather than a silently missing tool.
+
+Credentials are forwarded explicitly. The harness scrubs credential-shaped
+variables (`KEY`, `TOKEN`, `SECRET`, `PASSWORD`) out of the environment a child
+process inherits, so `config.apiKey` — falling back to the variable the server
+documents — is written into the child's environment by the plugin itself. That
+means both of these work:
+
+```yaml
+config:
+  apiKey: '<your key>'
+```
+
+```sh
+export STEP_API_KEY='<your key>'   # picked up at load time
+```
+
+## Development
+
+No build step and no runtime dependencies — `@deepseek-ai/cordis` and
+`@deepseek-ai/dsh-mcp-client` are peers supplied by the Harness.
+
+```sh
+npm test    # node >= 22: manifest checks + the stdio mount, both Harness-free
+```
+
+The mount test loads `index.js` with `@deepseek-ai/dsh-mcp-client` stubbed and
+asserts the exact stdio configuration the plugin produces, including the
+credential forwarding above.
+
+## Repository layout
+
+| Path | Purpose |
+|---|---|
+| `index.js` | the DSH plugin: resolves the interpreter and mounts the server |
+| `cordis.patch.yml` | the loader row that activates the plugin |
+| `locale/{en,zh}.json` | card title and description for the plugin lists |
+| `assets/icon.svg` | card artwork |
+| `test/` | `npm test`: manifest composition and the mount contract |
+| `src/opencode_eyes/` | the MCP server, unchanged |
+| `pyproject.toml`, `requirements.txt` | the Python package metadata, unchanged |
+
+## Other hosts (unchanged)
+
+The server is a plain stdio MCP server and still works anywhere else. The
+repository's original README is kept verbatim as
+[`README.opencode.md`](README.opencode.md), and the launch stanza from it keeps
+working:
 
 ```json
 {
@@ -55,14 +155,15 @@ python -m opencode_eyes
       "command": ["python", "-m", "opencode_eyes"],
       "enabled": true,
       "timeout": 120000,
-      "environment": {
-        "STEP_API_KEY": "你的StepFun API Key"
-      }
+      "environment": { "STEP_API_KEY": "你的StepFun API Key" }
     }
   }
 }
 ```
 
+On another host, run the server from the repository's `src` directory (or put
+`src` on `PYTHONPATH`) — that is the one thing the plugin adds.
+
 ## License
 
-MIT
+[MIT](LICENSE) — the repository declared MIT in `pyproject.toml` but shipped no licence file; this plugin's release adds one.

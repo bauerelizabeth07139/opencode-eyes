@@ -1,5 +1,7 @@
 # opencode-eyes
 
+[![dsh.so risk](https://www.dsh.so/badge/opencode-eyes.svg)](https://www.dsh.so/artifact/opencode-eyes/)
+
 **Eyes for models that cannot see.** The image goes to StepFun's
 `step-3.7-flash` vision model; the description comes back as tool output.
 
